@@ -32,6 +32,7 @@ function flattenBookmarkTree(
         contentType: classification.contentType,
         dateAdded: node.dateAdded ?? Date.now(),
         tags: classification.tags,
+        userTags: [],
         status: "active",
       });
     }
@@ -121,7 +122,8 @@ export async function createBookmark(
     domain: classification.domain,
     contentType: classification.contentType,
     dateAdded: created.dateAdded ?? Date.now(),
-    tags: tags || classification.tags,
+    tags: [...(classification.tags), ...(tags || [])],
+    userTags: tags || [],
     status: "active",
   };
 

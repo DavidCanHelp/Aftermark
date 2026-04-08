@@ -1,4 +1,4 @@
-import type { Bookmark, Cluster, ContentType, Session, SavedFilter } from "../models/types";
+import type { Bookmark, Cluster, ContentType, Session, SavedFilter, TagRecord } from "../models/types";
 import type { BookmarkStats, ImportResult } from "../capture/import";
 import {
   exportAllAsCSV,
@@ -14,9 +14,11 @@ let allBookmarks: Bookmark[] = [];
 let allClusters: Cluster[] = [];
 let allSessions: Session[] = [];
 let savedFilters: SavedFilter[] = [];
+let allTags: TagRecord[] = [];
 let currentView = "dashboard";
 let bookmarkSearchQuery = "";
 let bookmarkTypeFilter = "";
+let bookmarkTagFilter = "";
 let bookmarkSort = "date-newest";
 let selectedIds = new Set<string>();
 let activeClusterId = "";
@@ -80,7 +82,7 @@ function renderCurrentView() {
   const handlers: Record<string, () => void> = {
     dashboard: renderDashboard, bookmarks: renderBookmarks, clusters: renderClusters,
     sessions: renderSessions, review: renderReview, cleanup: renderCleanup,
-    timeline: renderTimeline, insights: renderInsights,
+    timeline: renderTimeline, insights: renderInsights, tags: renderTagManager,
   };
   (handlers[currentView] || renderDashboard)();
 }
@@ -224,10 +226,11 @@ function renderDashboard() {
 function filterBM(): Bookmark[] {
   let list = allBookmarks;
   if (bookmarkTypeFilter) list = list.filter((b) => b.contentType === bookmarkTypeFilter);
+  if (bookmarkTagFilter) list = list.filter((b) => (b.tags || []).includes(bookmarkTagFilter));
   if (bookmarkSearchQuery) {
     const terms = bookmarkSearchQuery.toLowerCase().split(/\s+/).filter(Boolean);
     list = list.filter((b) => {
-      const h = `${b.title} ${b.url} ${b.domain} ${b.contentType} ${b.tags.join(" ")} ${b.status}`.toLowerCase();
+      const h = `${b.title} ${b.url} ${b.domain} ${b.contentType} ${(b.tags||[]).join(" ")} ${b.status}`.toLowerCase();
       return terms.every((t) => h.includes(t));
     });
   }
@@ -263,6 +266,10 @@ function renderBookmarks() {
       <button class="filter-btn ${bookmarkTypeFilter===""?"active":""}" data-type="">All</button>
       ${types.map((t) => `<button class="filter-btn ${bookmarkTypeFilter===t?"active":""}" data-type="${t}">${t}</button>`).join("")}
     </div>
+    ${allTags.filter((t)=>t.isUser).length>0?`<div class="tag-filter-row">
+      ${bookmarkTagFilter?`<span class="tag-filter-pill active" data-tag-filter="">&times; Clear</span>`:""}
+      ${allTags.filter((t)=>t.isUser).slice(0,20).map((t)=>`<span class="tag-filter-pill ${bookmarkTagFilter===t.name?"active":""}" data-tag-filter="${esc(t.name)}">#${esc(t.name)} <span style="opacity:0.5">${t.count}</span></span>`).join("")}
+    </div>`:""}
     <div class="results-count">${filtered.length} bookmarks</div>
     <div class="bulk-header">
       <input type="checkbox" class="bm-check" id="select-all" title="Select all">
@@ -270,6 +277,7 @@ function renderBookmarks() {
       <div class="bulk-actions">
         <button id="bulk-delete" class="danger">Delete Selected (0)</button>
         <button id="bulk-exclude">Mark Excluded (0)</button>
+        <button id="bulk-tag">Tag Selected</button>
         <button id="bulk-export">Export Selected</button>
       </div>
     </div>
@@ -292,11 +300,15 @@ function renderBookmarks() {
   el.querySelectorAll(".filter-btn[data-type]").forEach((btn) => {
     btn.addEventListener("click", () => { bookmarkTypeFilter = (btn as HTMLElement).dataset.type!; renderBookmarks(); });
   });
+  el.querySelectorAll("[data-tag-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => { bookmarkTagFilter = (btn as HTMLElement).dataset.tagFilter!; renderBookmarks(); });
+  });
   $("btn-add-bm").addEventListener("click", showAddBookmarkModal);
   $("btn-save-filter").addEventListener("click", saveCurrentFilter);
   wireSelectAll();
   $("bulk-delete").addEventListener("click", () => bulkDeleteSelected());
   $("bulk-exclude").addEventListener("click", () => bulkExcludeSelected());
+  $("bulk-tag").addEventListener("click", () => showBulkTagModal());
   $("bulk-export").addEventListener("click", () => {
     downloadFile(exportAllAsCSV([...selectedIds].map(bmById).filter(Boolean) as Bookmark[]), "aftermark-selected.csv", "text/csv");
   });
@@ -351,6 +363,17 @@ async function saveCurrentFilter() {
   renderSavedFilters();
 }
 
+function renderTagPills(bm: Bookmark | undefined): string {
+  if (!bm) return "";
+  const autoTags = (bm.tags || []).filter((t: string) => !(bm.userTags || []).includes(t));
+  const userTags = bm.userTags || [];
+  let html = '<span class="tag-pills">';
+  for (const t of autoTags.slice(0, 3)) html += `<span class="tag-pill auto">${esc(t)}</span>`;
+  for (const t of userTags) html += `<span class="tag-pill user">${esc(t)}<span class="tag-remove" data-remove-tag="${esc(t)}" data-tag-bm="${esc(bm.id)}">x</span></span>`;
+  html += `<button class="tag-add-btn" data-add-tag="${esc(bm.id)}" title="Add tag">+</button></span>`;
+  return html;
+}
+
 function renderBookmarkRows(bookmarks: Bookmark[], container: HTMLElement) {
   const html = bookmarks.map((bm) => {
     const ct = bm.contentType || "unknown";
@@ -364,6 +387,7 @@ function renderBookmarkRows(bookmarks: Bookmark[], container: HTMLElement) {
       ${favicon(bm.domain)}
       <span class="bm-title">${esc(bm.title || bm.url)}</span>
       <span class="bm-domain">${esc(bm.domain)}</span>
+      ${renderTagPills(bm)}
       <span class="bm-badges">${badges.join("")}</span>
       <span class="bm-date">${fmtDate(bm.dateAdded)}</span>
       <span class="row-actions">
@@ -392,6 +416,12 @@ function wireRowActions(container: HTMLElement) {
     if (delBtn) { e.stopPropagation(); showDeleteConfirm(delBtn.dataset.delete!); return; }
     const removeBtn = target.closest("[data-remove-from-cluster]") as HTMLElement | null;
     if (removeBtn) { e.stopPropagation(); removeFromCluster(removeBtn.dataset.removeFromCluster!, removeBtn.dataset.clusterId!); return; }
+    // Tag remove
+    const tagRemove = target.closest("[data-remove-tag]") as HTMLElement | null;
+    if (tagRemove) { e.stopPropagation(); handleRemoveTag(tagRemove.dataset.tagBm!, tagRemove.dataset.removeTag!); return; }
+    // Tag add
+    const tagAdd = target.closest("[data-add-tag]") as HTMLElement | null;
+    if (tagAdd) { e.stopPropagation(); showTagDropdown(tagAdd, tagAdd.dataset.addTag!); return; }
     const row = target.closest(".bm-row") as HTMLElement | null;
     if (row?.dataset.url) chrome.tabs.create({ url: row.dataset.url });
   });
@@ -571,6 +601,7 @@ function renderClusterBookmarkRows(bookmarks: Bookmark[], container: HTMLElement
       ${favicon(bm.domain)}
       <span class="bm-title">${esc(bm.title || bm.url)}</span>
       <span class="bm-domain">${esc(bm.domain)}</span>
+      ${renderTagPills(bm)}
       <span class="bm-badges">${badges.join("")}</span>
       <span class="bm-date">${fmtDate(bm.dateAdded)}</span>
       <span class="row-actions">
@@ -717,6 +748,228 @@ function renderDupeGroups(groups: Map<string, Bookmark[]>): string {
         <button data-action="keep" data-bm-id="${esc(bm.id)}" data-group="${esc(key)}">Keep this</button></div>`).join("")}
     </div>`;
   }).join("") + (groups.size > 30 ? `<div class="empty-state">${groups.size-30} more groups</div>` : "");
+}
+
+// ── Tag operations ──
+
+async function handleRemoveTag(bmId: string, tagName: string) {
+  await send({ type: "removeTagFromBookmark", bookmarkId: bmId, tagName });
+  // Update local state
+  const bm = bmById(bmId);
+  if (bm) {
+    bm.tags = (bm.tags || []).filter((t) => t !== tagName);
+    bm.userTags = (bm.userTags || []).filter((t) => t !== tagName);
+  }
+  // Re-render just the tag pills in that row
+  const row = document.querySelector(`.bm-row[data-bm-id="${bmId}"]`);
+  if (row && bm) {
+    const pillsEl = row.querySelector(".tag-pills");
+    if (pillsEl) {
+      const temp = document.createElement("div");
+      temp.innerHTML = renderTagPills(bm);
+      pillsEl.replaceWith(temp.firstElementChild!);
+    }
+  }
+  const res = await send<{ tags: TagRecord[] }>({ type: "getAllTags" });
+  allTags = res.tags;
+}
+
+let activeDropdown: HTMLElement | null = null;
+
+function closeTagDropdown() {
+  if (activeDropdown) { activeDropdown.remove(); activeDropdown = null; }
+}
+
+async function showTagDropdown(anchor: HTMLElement, bmId: string) {
+  closeTagDropdown();
+  const { suggestions } = await send<{ suggestions: string[] }>({ type: "getTagSuggestions", bookmarkId: bmId });
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "tag-dropdown";
+  const rect = anchor.getBoundingClientRect();
+  dropdown.style.position = "fixed";
+  dropdown.style.left = `${rect.left}px`;
+  dropdown.style.top = `${rect.bottom + 4}px`;
+
+  dropdown.innerHTML = `<input type="text" placeholder="Add tag…" id="tag-input-${bmId}"><div class="tag-suggest" id="tag-suggest-${bmId}"></div>`;
+  document.body.appendChild(dropdown);
+  activeDropdown = dropdown;
+
+  const input = dropdown.querySelector("input")!;
+  const suggestEl = dropdown.querySelector(".tag-suggest")!;
+
+  function renderSuggestions(filter: string) {
+    const f = filter.toLowerCase();
+    const matched = f
+      ? [...allTags.map((t) => t.name), ...suggestions].filter((s) => s.includes(f))
+      : suggestions;
+    const unique = [...new Set(matched)].slice(0, 8);
+    suggestEl.innerHTML = unique.map((s) => `<div class="tag-suggest-item" data-suggest="${esc(s)}">${esc(s)}</div>`).join("");
+    if (f && !unique.includes(f)) {
+      suggestEl.innerHTML += `<div class="tag-suggest-item" data-suggest="${esc(f)}">Create "${esc(f)}"</div>`;
+    }
+  }
+
+  renderSuggestions("");
+  input.focus();
+
+  input.addEventListener("input", () => renderSuggestions(input.value.trim()));
+  input.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter") {
+      const tag = input.value.trim().toLowerCase();
+      if (tag) { await applyTag(bmId, tag); closeTagDropdown(); }
+    } else if (e.key === "Escape") { closeTagDropdown(); }
+  });
+
+  suggestEl.addEventListener("click", async (e) => {
+    const item = (e.target as HTMLElement).closest("[data-suggest]") as HTMLElement | null;
+    if (item) { await applyTag(bmId, item.dataset.suggest!); closeTagDropdown(); }
+  });
+
+  // Close on outside click
+  setTimeout(() => {
+    const handler = (e: MouseEvent) => {
+      if (!dropdown.contains(e.target as Node)) { closeTagDropdown(); document.removeEventListener("click", handler); }
+    };
+    document.addEventListener("click", handler);
+  }, 0);
+}
+
+async function applyTag(bmId: string, tagName: string) {
+  await send({ type: "addTagToBookmark", bookmarkId: bmId, tagName });
+  const bm = bmById(bmId);
+  if (bm) {
+    if (!bm.tags) bm.tags = [];
+    if (!bm.userTags) bm.userTags = [];
+    if (!bm.tags.includes(tagName)) bm.tags.push(tagName);
+    if (!bm.userTags.includes(tagName)) bm.userTags.push(tagName);
+  }
+  const row = document.querySelector(`.bm-row[data-bm-id="${bmId}"]`);
+  if (row && bm) {
+    const pillsEl = row.querySelector(".tag-pills");
+    if (pillsEl) {
+      const temp = document.createElement("div");
+      temp.innerHTML = renderTagPills(bm);
+      pillsEl.replaceWith(temp.firstElementChild!);
+    }
+  }
+  const res = await send<{ tags: TagRecord[] }>({ type: "getAllTags" });
+  allTags = res.tags;
+}
+
+function showBulkTagModal() {
+  if (!selectedIds.size) return;
+  const count = selectedIds.size;
+  showModal(`<h3>Tag ${count} bookmark${count>1?"s":""}</h3>
+    <label>Tag name</label>
+    <input id="bulk-tag-input" type="text" placeholder="Enter tag name">
+    <div id="bulk-tag-suggest" style="margin-top:8px"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="bt-cancel">Cancel</button>
+      <button class="btn-primary" id="bt-apply">Apply Tag</button>
+    </div>`);
+
+  const input = $("bulk-tag-input") as HTMLInputElement;
+  const suggestEl = $("bulk-tag-suggest");
+  const topTags = allTags.filter((t) => t.isUser).slice(0, 8);
+  suggestEl.innerHTML = topTags.map((t) => `<span class="tag-filter-pill" data-bt-suggest="${esc(t.name)}">#${esc(t.name)}</span>`).join(" ");
+
+  suggestEl.addEventListener("click", (e) => {
+    const pill = (e.target as HTMLElement).closest("[data-bt-suggest]") as HTMLElement | null;
+    if (pill) input.value = pill.dataset.btSuggest!;
+  });
+
+  $("bt-cancel").addEventListener("click", hideModal);
+  $("bt-apply").addEventListener("click", async () => {
+    const tag = input.value.trim().toLowerCase();
+    if (!tag) return;
+    await send({ type: "bulkAddTag", bookmarkIds: [...selectedIds], tagName: tag });
+    hideModal();
+    clearSelection();
+    await loadData();
+    renderCurrentView();
+  });
+}
+
+// ── Tag Manager ──
+
+function renderTagManager() {
+  const el = $("view-tags");
+  const tags = allTags;
+
+  el.innerHTML = `<h2>Tags</h2>
+    <div style="margin-bottom:16px;font-size:13px;color:var(--text-muted)">${tags.length} tags</div>
+    <div id="tag-manager-list">
+      ${tags.map((t) => `<div class="tag-manager-row" data-tag-name="${esc(t.name)}">
+        <span class="tm-color" style="background:${t.color || (t.isUser ? "var(--accent)" : "#444")}" data-tm-color="${esc(t.name)}"></span>
+        <span class="tm-name">#${esc(t.name)} ${t.isUser ? '<span style="font-size:10px;color:var(--accent)">(user)</span>' : '<span style="font-size:10px;color:var(--text-dim)">(auto)</span>'}</span>
+        <span class="tm-count">${t.count}</span>
+        <button class="filter-btn" data-tm-filter="${esc(t.name)}">Filter</button>
+        <button class="filter-btn" data-tm-rename="${esc(t.name)}">Rename</button>
+        <button class="filter-btn" data-tm-merge="${esc(t.name)}">Merge</button>
+        <button class="filter-btn" style="color:var(--red)" data-tm-delete="${esc(t.name)}">Delete</button>
+      </div>`).join("")}
+    </div>`;
+
+  el.addEventListener("click", async (e) => {
+    const target = e.target as HTMLElement;
+
+    const filterBtn = target.closest("[data-tm-filter]") as HTMLElement | null;
+    if (filterBtn) { bookmarkTagFilter = filterBtn.dataset.tmFilter!; switchView("bookmarks"); return; }
+
+    const renameBtn = target.closest("[data-tm-rename]") as HTMLElement | null;
+    if (renameBtn) {
+      const oldName = renameBtn.dataset.tmRename!;
+      showModal(`<h3>Rename Tag</h3><label>New name for #${esc(oldName)}</label><input id="tm-rename-input" type="text" value="${esc(oldName)}"><div class="modal-actions"><button class="btn-cancel" id="tm-rename-cancel">Cancel</button><button class="btn-primary" id="tm-rename-save">Rename</button></div>`);
+      $("tm-rename-cancel").addEventListener("click", hideModal);
+      $("tm-rename-save").addEventListener("click", async () => {
+        const newName = ($("tm-rename-input") as HTMLInputElement).value.trim();
+        if (newName) { await send({ type: "renameTag", oldName, newName }); hideModal(); await loadData(); renderTagManager(); }
+      });
+      return;
+    }
+
+    const mergeBtn = target.closest("[data-tm-merge]") as HTMLElement | null;
+    if (mergeBtn) {
+      const source = mergeBtn.dataset.tmMerge!;
+      const others = allTags.filter((t) => t.name !== source);
+      showModal(`<h3>Merge #${esc(source)} into…</h3><label>Target tag</label><select id="tm-merge-target">${others.map((t) => `<option value="${esc(t.name)}">#${esc(t.name)} (${t.count})</option>`).join("")}</select><div class="modal-actions"><button class="btn-cancel" id="tm-merge-cancel">Cancel</button><button class="btn-primary" id="tm-merge-save">Merge</button></div>`);
+      $("tm-merge-cancel").addEventListener("click", hideModal);
+      $("tm-merge-save").addEventListener("click", async () => {
+        const target = ($("tm-merge-target") as HTMLSelectElement).value;
+        await send({ type: "mergeTags", sourceTag: source, targetTag: target });
+        hideModal(); await loadData(); renderTagManager();
+      });
+      return;
+    }
+
+    const deleteBtn = target.closest("[data-tm-delete]") as HTMLElement | null;
+    if (deleteBtn) {
+      const tagName = deleteBtn.dataset.tmDelete!;
+      showModal(`<h3>Delete tag #${esc(tagName)}?</h3><p style="color:var(--text-muted);font-size:13px">This removes the tag from all bookmarks.</p><div class="modal-actions"><button class="btn-cancel" id="tm-del-cancel">Cancel</button><button class="btn-danger" id="tm-del-confirm">Delete</button></div>`);
+      $("tm-del-cancel").addEventListener("click", hideModal);
+      $("tm-del-confirm").addEventListener("click", async () => {
+        await send({ type: "deleteTag", tagName });
+        hideModal(); await loadData(); renderTagManager();
+      });
+      return;
+    }
+
+    const colorBtn = target.closest("[data-tm-color]") as HTMLElement | null;
+    if (colorBtn) {
+      const tagName = colorBtn.dataset.tmColor!;
+      const colors = ["#4a8aff", "#4caf50", "#ff9800", "#e74c3c", "#ba68c8", "#4dd0e1", "#f39c12", "#f48fb1", ""];
+      showModal(`<h3>Color for #${esc(tagName)}</h3><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${colors.map((c) => `<div style="width:28px;height:28px;border-radius:50%;background:${c||"#444"};border:2px solid var(--border);cursor:pointer" data-color-pick="${c}"></div>`).join("")}</div><div class="modal-actions"><button class="btn-cancel" id="tc-cancel">Cancel</button></div>`);
+      $("tc-cancel").addEventListener("click", hideModal);
+      modalContent.addEventListener("click", async (e) => {
+        const pick = (e.target as HTMLElement).closest("[data-color-pick]") as HTMLElement | null;
+        if (pick) {
+          await send({ type: "setTagColor", tagName, color: pick.dataset.colorPick! });
+          hideModal(); await loadData(); renderTagManager();
+        }
+      });
+    }
+  });
 }
 
 // ── Cleanup Wizard ──
@@ -1175,16 +1428,18 @@ function renderInsights() {
 // ── Data loading ──
 
 async function loadData() {
-  const [bmRes, clRes, ssRes, sfRes] = await Promise.all([
+  const [bmRes, clRes, ssRes, sfRes, tRes] = await Promise.all([
     send<{ bookmarks: Bookmark[] }>({ type: "getAllBookmarks" }),
     send<{ clusters: Cluster[] }>({ type: "getClusters" }),
     send<{ sessions: Session[] }>({ type: "getSessions" }),
     send<{ filters: SavedFilter[] }>({ type: "getSavedFilters" }),
+    send<{ tags: TagRecord[] }>({ type: "getAllTags" }),
   ]);
   allBookmarks = bmRes.bookmarks;
   allClusters = clRes.clusters;
   allSessions = ssRes.sessions;
   savedFilters = sfRes.filters;
+  allTags = tRes.tags;
   $("nav-count-bm").textContent = String(allBookmarks.length);
   $("nav-count-cl").textContent = String(allClusters.length);
   $("nav-count-ss").textContent = String(allSessions.length);

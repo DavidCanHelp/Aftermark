@@ -9,7 +9,8 @@ export type ClusterType =
   | "project"
   | "topic"
   | "decision"
-  | "learning";
+  | "learning"
+  | "tag";
 export type ArtifactType =
   | "reading-list"
   | "comparison-table"
@@ -45,9 +46,17 @@ export interface Bookmark {
   dateAdded: number;
   dateLastUsed?: number;
   tags: string[];
+  userTags: string[];
   status: BookmarkStatus;
   canonicalId?: string;
   healthScore?: number;
+}
+
+export interface TagRecord {
+  name: string;
+  count: number;
+  isUser: boolean;
+  color: string;
 }
 
 export interface DocumentSnapshot {

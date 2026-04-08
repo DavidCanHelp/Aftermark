@@ -6,10 +6,11 @@ import type {
   Cluster,
   ActionArtifact,
   Session,
+  TagRecord,
 } from "../models/types";
 
 const DB_NAME = "aftermark";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export interface AftermarkDB {
   bookmarks: {
@@ -40,6 +41,10 @@ export interface AftermarkDB {
     value: ActionArtifact;
     indexes: { "by-cluster": string };
   };
+  tags: {
+    key: string;
+    value: TagRecord;
+  };
 }
 
 let dbInstance: IDBPDatabase<AftermarkDB> | null = null;
@@ -62,32 +67,25 @@ function createDB(): Promise<IDBPDatabase<AftermarkDB>> {
       }
 
       if (!db.objectStoreNames.contains("snapshots")) {
-        const snapshots = db.createObjectStore("snapshots", {
-          keyPath: "bookmarkId",
-        });
+        const snapshots = db.createObjectStore("snapshots", { keyPath: "bookmarkId" });
         snapshots.createIndex("by-bookmark", "bookmarkId");
       }
-
       if (!db.objectStoreNames.contains("inferences")) {
-        const inferences = db.createObjectStore("inferences", {
-          autoIncrement: true,
-        });
+        const inferences = db.createObjectStore("inferences", { autoIncrement: true });
         inferences.createIndex("by-bookmark", "bookmarkId");
       }
-
       if (!db.objectStoreNames.contains("clusters")) {
         db.createObjectStore("clusters", { keyPath: "id" });
       }
-
       if (!db.objectStoreNames.contains("sessions")) {
         db.createObjectStore("sessions", { keyPath: "id" });
       }
-
       if (!db.objectStoreNames.contains("artifacts")) {
-        const artifacts = db.createObjectStore("artifacts", {
-          autoIncrement: true,
-        });
+        const artifacts = db.createObjectStore("artifacts", { autoIncrement: true });
         artifacts.createIndex("by-cluster", "clusterId");
+      }
+      if (!db.objectStoreNames.contains("tags")) {
+        db.createObjectStore("tags", { keyPath: "name" });
       }
     },
   });
@@ -95,7 +93,6 @@ function createDB(): Promise<IDBPDatabase<AftermarkDB>> {
 
 export async function getDB(): Promise<IDBPDatabase<AftermarkDB>> {
   if (dbInstance) return dbInstance;
-
   try {
     dbInstance = await createDB();
   } catch (err) {
@@ -103,6 +100,5 @@ export async function getDB(): Promise<IDBPDatabase<AftermarkDB>> {
     await deleteDB(DB_NAME);
     dbInstance = await createDB();
   }
-
   return dbInstance;
 }

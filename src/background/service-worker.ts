@@ -10,6 +10,11 @@ import { buildSessions, getAllSessions } from "../capture/sessions";
 import { classifyBookmark, normalizeUrl } from "../capture/heuristics";
 import { computeHealthScore } from "../capture/health";
 import { captureTabContext } from "../capture/context";
+import {
+  getAllTags, addTagToBookmark, removeTagFromBookmark, bulkAddTag,
+  renameTag, deleteTag, mergeTags, getTagSuggestions, setTagColor,
+  rebuildTagRegistry, buildTagClusters,
+} from "../capture/tags";
 import { getDB } from "../db/database";
 import type { Bookmark } from "../models/types";
 
@@ -134,6 +139,7 @@ chrome.bookmarks.onCreated.addListener(async (id, node) => {
       contentType: classification.contentType,
       dateAdded: node.dateAdded ?? Date.now(),
       tags: classification.tags,
+      userTags: [],
       status: "active",
     };
     bm.healthScore = computeHealthScore(bm);
@@ -172,7 +178,8 @@ chrome.bookmarks.onChanged.addListener(async (id, changeInfo) => {
     });
     bm.domain = classification.domain;
     bm.contentType = classification.contentType;
-    bm.tags = classification.tags;
+    if (!bm.userTags) bm.userTags = [];
+    bm.tags = [...new Set([...classification.tags, ...bm.userTags])];
     bm.healthScore = computeHealthScore(bm);
 
     await db.put("bookmarks", bm);
@@ -219,7 +226,8 @@ chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
     });
     bm.domain = classification.domain;
     bm.contentType = classification.contentType;
-    bm.tags = classification.tags;
+    if (!bm.userTags) bm.userTags = [];
+    bm.tags = [...new Set([...classification.tags, ...bm.userTags])];
     bm.healthScore = computeHealthScore(bm);
 
     await db.put("bookmarks", bm);
@@ -269,7 +277,7 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
 
     case "reimportBookmarks":
       importAllBookmarks()
-        .then(async (result) => { await buildAllClusters(); await buildSessions(); await updateBadge(); sendResponse(result); })
+        .then(async (result) => { await buildAllClusters(); await buildSessions(); await rebuildTagRegistry(); await buildTagClusters(); await updateBadge(); sendResponse(result); })
         .catch(() => sendResponse({ total: 0, duplicates: 0 }));
       return true;
 
@@ -289,6 +297,59 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
 
     case "getSessions":
       getAllSessions().then((sessions) => sendResponse({ sessions })).catch(() => sendResponse({ sessions: [] }));
+      return true;
+
+    // ── Tag operations ──
+    case "getAllTags":
+      getAllTags().then((tags) => sendResponse({ tags })).catch(() => sendResponse({ tags: [] }));
+      return true;
+
+    case "addTagToBookmark":
+      addTagToBookmark(message.bookmarkId, message.tagName)
+        .then(async (bm) => { await buildTagClusters(); sendResponse({ ok: true, bookmark: bm }); })
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case "removeTagFromBookmark":
+      removeTagFromBookmark(message.bookmarkId, message.tagName)
+        .then(async (bm) => { await buildTagClusters(); sendResponse({ ok: true, bookmark: bm }); })
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case "bulkAddTag":
+      bulkAddTag(message.bookmarkIds, message.tagName)
+        .then(async (count) => { await buildTagClusters(); sendResponse({ ok: true, count }); })
+        .catch(() => sendResponse({ ok: false, count: 0 }));
+      return true;
+
+    case "renameTag":
+      renameTag(message.oldName, message.newName)
+        .then(async (count) => { await buildTagClusters(); sendResponse({ ok: true, count }); })
+        .catch(() => sendResponse({ ok: false, count: 0 }));
+      return true;
+
+    case "deleteTag":
+      deleteTag(message.tagName)
+        .then(async (count) => { await buildTagClusters(); sendResponse({ ok: true, count }); })
+        .catch(() => sendResponse({ ok: false, count: 0 }));
+      return true;
+
+    case "mergeTags":
+      mergeTags(message.sourceTag, message.targetTag)
+        .then(async (count) => { await buildTagClusters(); sendResponse({ ok: true, count }); })
+        .catch(() => sendResponse({ ok: false, count: 0 }));
+      return true;
+
+    case "setTagColor":
+      setTagColor(message.tagName, message.color)
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+
+    case "getTagSuggestions":
+      getTagSuggestions(message.bookmarkId)
+        .then((suggestions) => sendResponse({ suggestions }))
+        .catch(() => sendResponse({ suggestions: [] }));
       return true;
 
     // ── Cleanup wizard handlers ──
