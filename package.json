@@ -1,15 +1,18 @@
 {
   "name": "aftermark",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Aftermark — your bookmarks are breadcrumbs.",
   "private": true,
   "scripts": {
     "build": "node build.mjs",
-    "watch": "node build.mjs --watch"
+    "watch": "node build.mjs --watch",
+    "icons": "node scripts/generate-icons.mjs",
+    "package": "node build.mjs && node scripts/package.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.39",
     "esbuild": "^0.21.0",
+    "sharp": "^0.34.5",
     "typescript": "^5.4.0"
   },
   "dependencies": {

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Aftermark Privacy Policy</title>
+  <style>
+    body {
+      max-width: 640px;
+      margin: 40px auto;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #e0e0e0;
+      background: #111122;
+      padding: 0 20px;
+    }
+    h1 { font-size: 22px; color: #fff; margin-bottom: 4px; }
+    h2 { font-size: 17px; color: #ddd; margin-top: 28px; }
+    p, li { color: #bbb; }
+    a { color: #4a8aff; }
+    .updated { font-size: 13px; color: #666; margin-bottom: 24px; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 6px; }
+    code { background: #1a1a2e; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Aftermark Privacy Policy</h1>
+  <p class="updated">Last updated: April 2026</p>
+
+  <h2>What data does Aftermark collect?</h2>
+  <p>Aftermark reads your Chrome bookmarks to analyze, classify, and organize them. All processing happens entirely within your browser.</p>
+
+  <h2>Where is the data stored?</h2>
+  <p>All bookmark data, classifications, clusters, tags, health scores, and settings are stored locally in your browser using IndexedDB and <code>chrome.storage.local</code>. No data leaves your device.</p>
+
+  <h2>What data is sent to external servers?</h2>
+  <p>None. The only external requests are:</p>
+  <ul>
+    <li><strong>Favicon loading</strong>: Google's public favicon service for site icons. Does not transmit bookmark data.</li>
+    <li><strong>Dead link checking</strong>: When you manually trigger a scan, HEAD/GET requests go directly from your browser to bookmarked URLs. No intermediary server.</li>
+  </ul>
+
+  <h2>Analytics and telemetry</h2>
+  <p>There is no analytics, telemetry, tracking, or usage data collection of any kind.</p>
+
+  <h2>Accounts</h2>
+  <p>No account is required. There is no sign-in, registration, or user identification.</p>
+
+  <h2>Future AI features</h2>
+  <p>Optional AI enrichment features (planned) will use your own API key. Requests go directly from your browser to the AI provider. Aftermark will never proxy these requests. Your API key is stored locally and never transmitted to us.</p>
+
+  <h2>Data sharing</h2>
+  <p>Your data is never sold, shared, or transmitted to any third party.</p>
+
+  <h2>Deleting your data</h2>
+  <p>Remove the extension or clear its storage via <code>chrome://extensions</code> &gt; Aftermark &gt; Details &gt; Clear data.</p>
+
+  <h2>Permissions explained</h2>
+  <ul>
+    <li><strong>bookmarks</strong>: Read and write Chrome bookmarks (core functionality)</li>
+    <li><strong>storage</strong>: Store settings and API keys locally</li>
+    <li><strong>activeTab</strong>: Access current tab for context capture</li>
+    <li><strong>tabs</strong>: Read tab titles for bookmark enrichment</li>
+    <li><strong>host_permissions</strong>: Required for dead link checking</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>Questions? Open an issue at <a href="https://github.com/DavidCanHelp/Aftermark/issues">github.com/DavidCanHelp/Aftermark/issues</a></p>
+</body>
+</html>
