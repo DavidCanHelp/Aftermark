@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Aftermark",
+  "version": "0.1.0",
+  "description": "Your bookmarks are breadcrumbs.",
+  "permissions": ["bookmarks", "storage", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "dist/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Aftermark"
+  },
+  "options_page": "src/options/options.html",
+  "icons": {}
+}

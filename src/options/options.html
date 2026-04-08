@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      max-width: 480px;
+      margin: 32px auto;
+      font-family: system-ui, sans-serif;
+    }
+    h1 {
+      font-size: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 16px;
+      font-size: 14px;
+    }
+    input[type="password"] {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 12px;
+      padding: 6px 16px;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 13px;
+      color: green;
+    }
+  </style>
+</head>
+<body>
+  <h1>Aftermark Options</h1>
+  <label for="apiKey">Anthropic API Key</label>
+  <input type="password" id="apiKey" placeholder="sk-ant-…">
+  <button id="save">Save</button>
+  <p id="status"></p>
+  <script src="/dist/options/options.js" type="module"></script>
+</body>
+</html>
