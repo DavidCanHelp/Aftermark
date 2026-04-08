@@ -91,3 +91,39 @@ export async function getAllBookmarks(): Promise<Bookmark[]> {
   const db = await getDB();
   return db.getAll("bookmarks");
 }
+
+export async function createBookmark(
+  url: string,
+  title: string | undefined,
+  folderPath: string | undefined,
+  tags: string[] | undefined
+): Promise<Bookmark> {
+  // Create in Chrome bookmarks first
+  const created = await chrome.bookmarks.create({
+    url,
+    title: title || url,
+  });
+
+  const classification = classifyBookmark({
+    url,
+    title: title || created.title || "",
+    folderPath: folderPath || "",
+  });
+
+  const bookmark: Bookmark = {
+    id: created.id,
+    url,
+    normalizedUrl: normalizeUrl(url),
+    title: title || created.title || "",
+    folderPath: folderPath || "",
+    domain: classification.domain,
+    contentType: classification.contentType,
+    dateAdded: created.dateAdded ?? Date.now(),
+    tags: tags || classification.tags,
+    status: "active",
+  };
+
+  const db = await getDB();
+  await db.put("bookmarks", bookmark);
+  return bookmark;
+}

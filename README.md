@@ -6,7 +6,7 @@ Aftermark is a Chrome extension that treats your bookmarks as compressed intenti
 
 ## Status
 
-v0.2.0 — Full tab UI, deterministic clustering, session reconstruction, timeline, review dashboard, and export. All local analysis, no AI calls yet.
+v0.2.1 — Full tab UI with CRUD, batch operations, deterministic clustering, session reconstruction, timeline, review dashboard, and export. All local analysis, no AI calls yet.
 
 ## Features
 
@@ -20,6 +20,14 @@ Six-view dark theme interface with sidebar navigation. Open via popup or browser
 - **Sessions** — reconstructed browsing sessions from bookmark timestamps. Expandable cards showing bookmarks within each session
 - **Review** — stale bookmarks (>6 months), forgotten (>1 year), dead links with recheck/remove, duplicates grouped with "keep this one" selector
 - **Timeline** — month-by-month bar chart. Click any month to expand and see individual bookmarks
+
+### Bookmark CRUD
+
+- **Add** — create bookmarks from the All Bookmarks view (URL, title, tags). Auto-classifies via heuristics and syncs to Chrome bookmarks
+- **Edit** — inline edit title, tags, and status (active/excluded) on any bookmark row. Syncs title back to Chrome via `chrome.bookmarks.update()`
+- **Delete** — single delete with confirmation, or batch delete via checkboxes. Removes from both IndexedDB and Chrome bookmarks
+- **Bulk actions** — select multiple bookmarks with checkboxes (or select-all), then Delete Selected, Mark Excluded, or Export Selected. Available in both All Bookmarks and cluster detail views
+- **Cluster management** — rename clusters, merge two clusters, remove bookmarks from a cluster. Empty clusters are auto-pruned after any delete or removal operation
 
 ### Analysis
 
