@@ -469,6 +469,66 @@
     .insights-histogram-wrap { margin-bottom: 16px; }
     .insights-histogram-labels { display: flex; gap: 2px; }
     .insights-histogram-labels span { flex: 1; font-size: 9px; color: var(--text-dim); text-align: center; min-width: 0; overflow: hidden; }
+    /* Cleanup wizard */
+    .wizard-progress {
+      display: flex; align-items: center; gap: 4px; margin-bottom: 24px;
+    }
+    .wizard-progress .wp-step {
+      width: 32px; height: 4px; border-radius: 2px; background: var(--border);
+    }
+    .wizard-progress .wp-step.done { background: var(--green); }
+    .wizard-progress .wp-step.active { background: var(--accent); }
+    .wizard-progress-label {
+      font-size: 12px; color: var(--text-dim); margin-left: 12px;
+    }
+    .wizard-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 32px;
+      max-width: 640px;
+    }
+    .wizard-card h3 { font-size: 18px; color: var(--white); margin-bottom: 12px; }
+    .wizard-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px; }
+    .wizard-card .wiz-examples {
+      background: var(--bg-elevated); border-radius: 6px; padding: 12px 16px;
+      margin-bottom: 16px; font-size: 13px; color: var(--text);
+    }
+    .wizard-card .wiz-examples .we-item {
+      padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .wizard-card .wiz-examples .we-item:last-child { border-bottom: none; }
+    .wizard-actions {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .wizard-actions button {
+      padding: 8px 18px; border-radius: 6px; font-size: 13px; cursor: pointer;
+      border: 1px solid var(--border);
+    }
+    .wizard-actions .wiz-primary { background: var(--accent); color: var(--white); border-color: var(--accent); }
+    .wizard-actions .wiz-primary:hover { opacity: 0.9; }
+    .wizard-actions .wiz-secondary { background: var(--bg-elevated); color: var(--text-muted); }
+    .wizard-actions .wiz-secondary:hover { color: var(--text); border-color: var(--border-hover); }
+    .wizard-actions .wiz-danger { background: #4a1a1a; color: var(--red); border-color: #5a2020; }
+    .wizard-actions .wiz-danger:hover { background: #5a2020; }
+    .wizard-skip-all {
+      display: block; font-size: 12px; color: var(--text-dim); margin-top: 16px; cursor: pointer;
+      background: none; border: none; text-decoration: underline;
+    }
+    .wizard-skip-all:hover { color: var(--text-muted); }
+    .wizard-result {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 14px; color: var(--green); margin-bottom: 16px;
+    }
+    .wizard-summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;
+    }
+    .wizard-summary-grid .ws-item {
+      background: var(--bg-elevated); border-radius: 6px; padding: 12px 14px;
+    }
+    .wizard-summary-grid .ws-label { font-size: 11px; color: var(--text-dim); }
+    .wizard-summary-grid .ws-value { font-size: 18px; font-weight: 600; color: var(--white); margin-top: 2px; }
     /* Utilities */
     .empty-state { text-align: center; color: var(--text-dim); padding: 40px 0; }
     .results-count { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
@@ -487,6 +547,7 @@
       <button class="nav-item" data-view="clusters">Clusters <span class="nav-count" id="nav-count-cl">—</span></button>
       <button class="nav-item" data-view="sessions">Sessions <span class="nav-count" id="nav-count-ss">—</span></button>
       <button class="nav-item" data-view="review">Review</button>
+      <button class="nav-item" data-view="cleanup">Cleanup</button>
       <button class="nav-item" data-view="timeline">Timeline</button>
       <button class="nav-item" data-view="insights">Insights</button>
     </nav>
@@ -501,6 +562,7 @@
     <div class="view" id="view-clusters"></div>
     <div class="view" id="view-sessions"></div>
     <div class="view" id="view-review"></div>
+    <div class="view" id="view-cleanup"></div>
     <div class="view" id="view-timeline"></div>
     <div class="view" id="view-insights"></div>
   </main>

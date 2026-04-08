@@ -79,7 +79,8 @@ function switchView(view: string) {
 function renderCurrentView() {
   const handlers: Record<string, () => void> = {
     dashboard: renderDashboard, bookmarks: renderBookmarks, clusters: renderClusters,
-    sessions: renderSessions, review: renderReview, timeline: renderTimeline, insights: renderInsights,
+    sessions: renderSessions, review: renderReview, cleanup: renderCleanup,
+    timeline: renderTimeline, insights: renderInsights,
   };
   (handlers[currentView] || renderDashboard)();
 }
@@ -718,7 +719,296 @@ function renderDupeGroups(groups: Map<string, Bookmark[]>): string {
   }).join("") + (groups.size > 30 ? `<div class="empty-state">${groups.size-30} more groups</div>` : "");
 }
 
-// ── Timeline (sparkline) ──
+// ── Cleanup Wizard ──
+
+let wizardStep = 0;
+let wizardStats = { startTotal: 0, startDupes: 0, startDead: 0, startHealth: 0, removedDupes: 0, removedDead: 0 };
+const WIZARD_STEPS = 7;
+
+function wizardProgress(step: number): string {
+  return `<div class="wizard-progress">${Array.from({length: WIZARD_STEPS}, (_, i) =>
+    `<div class="wp-step ${i < step ? "done" : i === step ? "active" : ""}"></div>`
+  ).join("")}<span class="wizard-progress-label">Step ${step + 1} of ${WIZARD_STEPS}</span></div>`;
+}
+
+async function renderCleanup() {
+  const el = $("view-cleanup");
+  // Load persisted step
+  const { step } = await send<{ step: number }>({ type: "getWizardStep" });
+  wizardStep = step;
+  if (wizardStep === 0) {
+    // Initialize stats snapshot
+    wizardStats.startTotal = allBookmarks.length;
+    wizardStats.startDupes = allBookmarks.filter((b) => b.status === "duplicate").length;
+    wizardStats.startDead = allBookmarks.filter((b) => b.status === "dead").length;
+    wizardStats.startHealth = allBookmarks.length > 0 ? Math.round(allBookmarks.reduce((s, b) => s + (b.healthScore ?? 50), 0) / allBookmarks.length) : 0;
+    wizardStats.removedDupes = 0;
+    wizardStats.removedDead = 0;
+  }
+  renderWizardStep(el);
+}
+
+async function advanceWizard(el: HTMLElement) {
+  wizardStep++;
+  await send({ type: "setWizardStep", step: wizardStep });
+  await loadData();
+  renderWizardStep(el);
+}
+
+async function skipToEnd(el: HTMLElement) {
+  wizardStep = WIZARD_STEPS - 1;
+  await send({ type: "setWizardStep", step: wizardStep });
+  await loadData();
+  renderWizardStep(el);
+}
+
+function renderWizardStep(el: HTMLElement) {
+  switch (wizardStep) {
+    case 0: renderWizardDuplicates(el); break;
+    case 1: renderWizardLikelyDupes(el); break;
+    case 2: renderWizardDeadLinks(el); break;
+    case 3: renderWizardStale(el); break;
+    case 4: renderWizardSingleVisit(el); break;
+    case 5: renderWizardEmptyFolders(el); break;
+    case 6: renderWizardSummary(el); break;
+    default: renderWizardSummary(el); break;
+  }
+}
+
+function renderWizardDuplicates(el: HTMLElement) {
+  const dupes = allBookmarks.filter((b) => b.status === "duplicate");
+  const groups = new Map<string, typeof dupes>();
+  for (const d of dupes) { const k = d.canonicalId || d.normalizedUrl; const g = groups.get(k); if (g) g.push(d); else groups.set(k, [d]); }
+  const examples = [...groups.entries()].slice(0, 5);
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(0)}
+    <div class="wizard-card">
+      <h3>Step 1: Exact Duplicates</h3>
+      <p>You have <strong>${dupes.length}</strong> exact duplicates across ${groups.size} groups. Keep the oldest bookmark in each group and remove the rest?</p>
+      ${examples.length > 0 ? `<div class="wiz-examples">${examples.map(([, grp]) => {
+        const canonical = bmById(grp[0].canonicalId || "") || grp[0];
+        return `<div class="we-item">${favicon(canonical.domain)} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(canonical.title || canonical.url)}</span><span style="color:var(--text-dim);font-size:11px">${grp.length + 1} copies</span></div>`;
+      }).join("")}</div>` : '<p style="color:var(--green)">No exact duplicates found!</p>'}
+      <div class="wizard-actions">
+        ${dupes.length > 0 ? `<button class="wiz-danger" id="wiz-delete-dupes">Delete ${dupes.length} duplicates</button><button class="wiz-secondary" id="wiz-review-dupes">Review individually</button>` : ""}
+        <button class="wiz-secondary" id="wiz-skip">Skip</button>
+      </div>
+      <button class="wizard-skip-all" id="wiz-skip-all">Skip all steps</button>
+    </div>`;
+
+  document.getElementById("wiz-delete-dupes")?.addEventListener("click", async () => {
+    const res = await send<{ deleted: number }>({ type: "bulkDeleteDuplicates" });
+    wizardStats.removedDupes = res.deleted;
+    await advanceWizard(el);
+  });
+  document.getElementById("wiz-review-dupes")?.addEventListener("click", () => switchView("review"));
+  $("wiz-skip").addEventListener("click", () => advanceWizard(el));
+  $("wiz-skip-all").addEventListener("click", () => skipToEnd(el));
+}
+
+function renderWizardLikelyDupes(el: HTMLElement) {
+  const likely = allBookmarks.filter((b) => b.status === "likely-duplicate");
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(1)}
+    <div class="wizard-card">
+      ${wizardStats.removedDupes > 0 ? `<div class="wizard-result">Removed ${wizardStats.removedDupes} duplicates</div>` : ""}
+      <h3>Step 2: Likely Duplicates</h3>
+      <p>Found <strong>${likely.length}</strong> bookmarks that look like duplicates (similar titles on the same domain).</p>
+      ${likely.length > 0 ? `<div class="wiz-examples">${likely.slice(0, 5).map((bm) => {
+        const canon = bmById(bm.canonicalId || "");
+        return `<div class="we-item">${favicon(bm.domain)} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(bm.title)}</span>${canon ? `<span style="color:var(--text-dim);font-size:11px">similar to "${esc(canon.title.slice(0,30))}"</span>` : ""}</div>`;
+      }).join("")}</div>` : '<p style="color:var(--green)">No likely duplicates found!</p>'}
+      <div class="wizard-actions">
+        ${likely.length > 0 ? `<button class="wiz-secondary" id="wiz-review-likely">Review these</button>` : ""}
+        <button class="wiz-secondary" id="wiz-skip">Skip</button>
+      </div>
+      <button class="wizard-skip-all" id="wiz-skip-all">Skip all steps</button>
+    </div>`;
+
+  document.getElementById("wiz-review-likely")?.addEventListener("click", () => switchView("review"));
+  $("wiz-skip").addEventListener("click", () => advanceWizard(el));
+  $("wiz-skip-all").addEventListener("click", () => skipToEnd(el));
+}
+
+function renderWizardDeadLinks(el: HTMLElement) {
+  const dead = allBookmarks.filter((b) => b.status === "dead");
+  const active = allBookmarks.filter((b) => b.status === "active");
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(2)}
+    <div class="wizard-card">
+      <h3>Step 3: Dead Links</h3>
+      ${dead.length > 0
+        ? `<p>You already have <strong>${dead.length}</strong> dead links detected. Remove them all?</p>
+           <div class="wizard-actions">
+             <button class="wiz-danger" id="wiz-delete-dead">Remove ${dead.length} dead links</button>
+             <button class="wiz-secondary" id="wiz-review-dead">Review individually</button>
+             <button class="wiz-secondary" id="wiz-skip">Skip</button>
+           </div>`
+        : `<p>Want to check for dead links? This scans all <strong>${active.length}</strong> active bookmarks and may take a few minutes.</p>
+           <div class="wizard-actions">
+             <button class="wiz-primary" id="wiz-start-scan">Start scan</button>
+             <button class="wiz-secondary" id="wiz-skip">Skip</button>
+           </div>`}
+      <div id="wiz-dead-progress" style="margin-top:12px"></div>
+      <button class="wizard-skip-all" id="wiz-skip-all">Skip all steps</button>
+    </div>`;
+
+  document.getElementById("wiz-delete-dead")?.addEventListener("click", async () => {
+    const res = await send<{ deleted: number }>({ type: "bulkDeleteDead" });
+    wizardStats.removedDead = res.deleted;
+    await advanceWizard(el);
+  });
+  document.getElementById("wiz-review-dead")?.addEventListener("click", () => switchView("review"));
+  document.getElementById("wiz-start-scan")?.addEventListener("click", async () => {
+    const prog = document.getElementById("wiz-dead-progress")!;
+    prog.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Scanning...</div>';
+
+    // Listen for progress
+    const progressHandler = (msg: any) => {
+      if (msg.type === "linkCheckProgress") {
+        prog.innerHTML = `<div style="font-size:13px;color:var(--text-muted)">Checking... ${msg.checked}/${msg.total} (${msg.dead} dead)</div>`;
+      }
+    };
+    chrome.runtime.onMessage.addListener(progressHandler);
+
+    const { dead: deadCount } = await send<{ dead: number }>({ type: "checkDeadLinks" });
+    chrome.runtime.onMessage.removeListener(progressHandler);
+    await loadData();
+
+    if (deadCount > 0) {
+      prog.innerHTML = `<p style="color:var(--text);margin-bottom:12px">Found <strong>${deadCount}</strong> dead links.</p>
+        <div class="wizard-actions">
+          <button class="wiz-danger" id="wiz-delete-dead-post">Remove ${deadCount} dead links</button>
+          <button class="wiz-secondary" id="wiz-review-dead-post">Review individually</button>
+          <button class="wiz-secondary" id="wiz-skip-post">Skip</button>
+        </div>`;
+      document.getElementById("wiz-delete-dead-post")?.addEventListener("click", async () => {
+        const res = await send<{ deleted: number }>({ type: "bulkDeleteDead" });
+        wizardStats.removedDead = res.deleted;
+        await advanceWizard(el);
+      });
+      document.getElementById("wiz-review-dead-post")?.addEventListener("click", () => switchView("review"));
+      document.getElementById("wiz-skip-post")?.addEventListener("click", () => advanceWizard(el));
+    } else {
+      prog.innerHTML = '<div class="wizard-result">No dead links found!</div>';
+      setTimeout(() => advanceWizard(el), 1000);
+    }
+  });
+  $("wiz-skip").addEventListener("click", () => advanceWizard(el));
+  $("wiz-skip-all").addEventListener("click", () => skipToEnd(el));
+}
+
+function renderWizardStale(el: HTMLElement) {
+  const now = Date.now();
+  const twoYears = 2 * 365 * 24 * 60 * 60 * 1000;
+  const stale = allBookmarks.filter((b) => b.status === "active" && (now - b.dateAdded > twoYears) && (!b.dateLastUsed || b.dateLastUsed === b.dateAdded));
+  const top5 = stale.sort((a, b) => a.dateAdded - b.dateAdded).slice(0, 5);
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(3)}
+    <div class="wizard-card">
+      ${wizardStats.removedDead > 0 ? `<div class="wizard-result">Removed ${wizardStats.removedDead} dead links</div>` : ""}
+      <h3>Step 4: Stale Bookmarks</h3>
+      <p>You have <strong>${stale.length}</strong> bookmarks older than 2 years that you've never revisited.</p>
+      ${top5.length > 0 ? `<div class="wiz-examples">${top5.map((bm) =>
+        `<div class="we-item">${favicon(bm.domain)} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(bm.title || bm.url)}</span><span style="color:var(--text-dim);font-size:11px">${fmtDate(bm.dateAdded)}</span></div>`
+      ).join("")}</div>` : '<p style="color:var(--green)">No stale bookmarks!</p>'}
+      <div class="wizard-actions">
+        ${stale.length > 0 ? `<button class="wiz-secondary" id="wiz-review-stale">Review stale bookmarks</button>` : ""}
+        <button class="wiz-secondary" id="wiz-skip">Skip</button>
+      </div>
+      <button class="wizard-skip-all" id="wiz-skip-all">Skip all steps</button>
+    </div>`;
+
+  document.getElementById("wiz-review-stale")?.addEventListener("click", () => switchView("review"));
+  $("wiz-skip").addEventListener("click", () => advanceWizard(el));
+  $("wiz-skip-all").addEventListener("click", () => skipToEnd(el));
+}
+
+async function renderWizardSingleVisit(el: HTMLElement) {
+  const { singles } = await send<{ singles: { id: string; title: string; url: string; domain: string }[] }>({ type: "getSingleVisitDomains" });
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(4)}
+    <div class="wizard-card">
+      <h3>Step 5: Single-visit Domains</h3>
+      <p>You have <strong>${singles.length}</strong> bookmarks from domains you only saved once. These are often one-off pages.</p>
+      ${singles.length > 0 ? `<div class="wiz-examples">${singles.slice(0, 10).map((s) =>
+        `<div class="we-item">${favicon(s.domain)} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title || s.url)}</span><span style="color:var(--text-dim);font-size:11px">${esc(s.domain)}</span></div>`
+      ).join("")}${singles.length > 10 ? `<div style="padding:4px 0;color:var(--text-dim);font-size:11px">...and ${singles.length - 10} more</div>` : ""}</div>` : '<p style="color:var(--green)">All your domains have multiple bookmarks!</p>'}
+      <div class="wizard-actions">
+        ${singles.length > 0 ? `<button class="wiz-secondary" id="wiz-review-singles">Review these</button>` : ""}
+        <button class="wiz-secondary" id="wiz-skip">Skip</button>
+      </div>
+      <button class="wizard-skip-all" id="wiz-skip-all">Skip all steps</button>
+    </div>`;
+
+  document.getElementById("wiz-review-singles")?.addEventListener("click", () => {
+    bookmarkSearchQuery = "";
+    bookmarkTypeFilter = "";
+    bookmarkSort = "domain-az";
+    switchView("bookmarks");
+  });
+  $("wiz-skip").addEventListener("click", () => advanceWizard(el));
+  $("wiz-skip-all").addEventListener("click", () => skipToEnd(el));
+}
+
+async function renderWizardEmptyFolders(el: HTMLElement) {
+  const { folders } = await send<{ folders: { name: string; count: number }[] }>({ type: "getEmptyFolders" });
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(5)}
+    <div class="wizard-card">
+      <h3>Step 6: Dead Folders</h3>
+      <p><strong>${folders.length}</strong> bookmark folders contain only stale or dead links.</p>
+      ${folders.length > 0 ? `<div class="wiz-examples">${folders.slice(0, 10).map((f) =>
+        `<div class="we-item"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span style="color:var(--text-dim);font-size:11px">${f.count} bookmarks</span></div>`
+      ).join("")}</div>` : '<p style="color:var(--green)">No dead folders!</p>'}
+      <div class="wizard-actions">
+        ${folders.length > 0 ? `<button class="wiz-secondary" id="wiz-review-folders">Review in detail</button>` : ""}
+        <button class="wiz-secondary" id="wiz-skip">Skip</button>
+      </div>
+      <button class="wizard-skip-all" id="wiz-skip-all">Skip all steps</button>
+    </div>`;
+
+  document.getElementById("wiz-review-folders")?.addEventListener("click", () => switchView("review"));
+  $("wiz-skip").addEventListener("click", () => advanceWizard(el));
+  $("wiz-skip-all").addEventListener("click", () => skipToEnd(el));
+}
+
+async function renderWizardSummary(el: HTMLElement) {
+  await loadData();
+  const newTotal = allBookmarks.length;
+  const newDupes = allBookmarks.filter((b) => b.status === "duplicate" || b.status === "likely-duplicate").length;
+  const newDead = allBookmarks.filter((b) => b.status === "dead").length;
+  const newHealth = allBookmarks.length > 0 ? Math.round(allBookmarks.reduce((s, b) => s + (b.healthScore ?? 50), 0) / allBookmarks.length) : 0;
+  const hcBefore = wizardStats.startHealth > 70 ? "var(--green)" : wizardStats.startHealth > 40 ? "var(--yellow)" : "var(--red)";
+  const hcAfter = newHealth > 70 ? "var(--green)" : newHealth > 40 ? "var(--yellow)" : "var(--red)";
+
+  el.innerHTML = `<h2>Cleanup Wizard</h2>${wizardProgress(6)}
+    <div class="wizard-card">
+      <h3>Cleanup Complete!</h3>
+      <div class="wizard-summary-grid">
+        <div class="ws-item"><div class="ws-label">Total Bookmarks</div><div class="ws-value">${wizardStats.startTotal} → ${newTotal}</div></div>
+        <div class="ws-item"><div class="ws-label">Duplicates Removed</div><div class="ws-value" style="color:var(--green)">${wizardStats.removedDupes}</div></div>
+        <div class="ws-item"><div class="ws-label">Dead Links Removed</div><div class="ws-value" style="color:var(--green)">${wizardStats.removedDead}</div></div>
+        <div class="ws-item"><div class="ws-label">Remaining Duplicates</div><div class="ws-value">${newDupes}</div></div>
+        <div class="ws-item"><div class="ws-label">Remaining Dead</div><div class="ws-value">${newDead}</div></div>
+        <div class="ws-item"><div class="ws-label">Health Score</div><div class="ws-value"><span style="color:${hcBefore}">${wizardStats.startHealth}</span> → <span style="color:${hcAfter}">${newHealth}</span></div></div>
+      </div>
+      <div class="wizard-actions">
+        <button class="wiz-primary" id="wiz-done">Done</button>
+        <button class="wiz-secondary" id="wiz-restart">Run Again</button>
+      </div>
+    </div>`;
+
+  $("wiz-done").addEventListener("click", async () => {
+    await send({ type: "setWizardStep", step: 0 });
+    switchView("dashboard");
+  });
+  $("wiz-restart").addEventListener("click", async () => {
+    wizardStep = 0;
+    await send({ type: "setWizardStep", step: 0 });
+    renderCleanup();
+  });
+}
 
 function renderTimeline() {
   const el = $("view-timeline");

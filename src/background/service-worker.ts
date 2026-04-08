@@ -291,6 +291,113 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
       getAllSessions().then((sessions) => sendResponse({ sessions })).catch(() => sendResponse({ sessions: [] }));
       return true;
 
+    // ── Cleanup wizard handlers ──
+    case "bulkDeleteDuplicates":
+      (async () => {
+        const db = await getDB();
+        const all = await db.getAll("bookmarks");
+        const groups = new Map<string, typeof all>();
+        for (const bm of all) {
+          if (bm.status !== "duplicate") continue;
+          const key = bm.canonicalId || bm.normalizedUrl;
+          const g = groups.get(key);
+          if (g) g.push(bm); else groups.set(key, [bm]);
+        }
+        let deleted = 0;
+        suppressEvents = true;
+        const tx = db.transaction("bookmarks", "readwrite");
+        for (const [, dupes] of groups) {
+          for (const d of dupes) {
+            await tx.store.delete(d.id);
+            try { await chrome.bookmarks.remove(d.id); } catch {}
+            deleted++;
+          }
+        }
+        await tx.done;
+        suppressEvents = false;
+        await pruneEmptyClusters(new Set(all.filter((b) => b.status === "duplicate").map((b) => b.id)));
+        await updateBadge();
+        sendResponse({ ok: true, deleted });
+      })().catch(() => { suppressEvents = false; sendResponse({ ok: false, deleted: 0 }); });
+      return true;
+
+    case "bulkDeleteDead":
+      (async () => {
+        const db = await getDB();
+        const all = await db.getAll("bookmarks");
+        const dead = all.filter((b) => b.status === "dead");
+        let deleted = 0;
+        suppressEvents = true;
+        const tx = db.transaction("bookmarks", "readwrite");
+        for (const bm of dead) {
+          await tx.store.delete(bm.id);
+          try { await chrome.bookmarks.remove(bm.id); } catch {}
+          deleted++;
+        }
+        await tx.done;
+        suppressEvents = false;
+        await pruneEmptyClusters(new Set(dead.map((b) => b.id)));
+        await updateBadge();
+        sendResponse({ ok: true, deleted });
+      })().catch(() => { suppressEvents = false; sendResponse({ ok: false, deleted: 0 }); });
+      return true;
+
+    case "getSingleVisitDomains":
+      (async () => {
+        const db = await getDB();
+        const all = await db.getAll("bookmarks");
+        const dc = new Map<string, string[]>();
+        for (const bm of all) {
+          if (!bm.domain || bm.status === "excluded") continue;
+          const ids = dc.get(bm.domain);
+          if (ids) ids.push(bm.id); else dc.set(bm.domain, [bm.id]);
+        }
+        const singles: { id: string; title: string; url: string; domain: string }[] = [];
+        for (const [domain, ids] of dc) {
+          if (ids.length === 1) {
+            const bm = all.find((b) => b.id === ids[0]);
+            if (bm) singles.push({ id: bm.id, title: bm.title, url: bm.url, domain });
+          }
+        }
+        sendResponse({ singles });
+      })().catch(() => sendResponse({ singles: [] }));
+      return true;
+
+    case "getEmptyFolders":
+      (async () => {
+        const db = await getDB();
+        const all = await db.getAll("bookmarks");
+        const now = Date.now();
+        const sixMonths = 180 * 24 * 60 * 60 * 1000;
+        const folders = new Map<string, typeof all>();
+        for (const bm of all) {
+          if (!bm.folderPath) continue;
+          const list = folders.get(bm.folderPath);
+          if (list) list.push(bm); else folders.set(bm.folderPath, [bm]);
+        }
+        const deadFolders: { name: string; count: number }[] = [];
+        for (const [name, bms] of folders) {
+          const allDead = bms.every((b) =>
+            b.status === "dead" || b.status === "excluded" ||
+            (b.status === "active" && (now - b.dateAdded > sixMonths) && (!b.dateLastUsed || b.dateLastUsed === b.dateAdded))
+          );
+          if (allDead) deadFolders.push({ name, count: bms.length });
+        }
+        deadFolders.sort((a, b) => b.count - a.count);
+        sendResponse({ folders: deadFolders });
+      })().catch(() => sendResponse({ folders: [] }));
+      return true;
+
+    case "getWizardStep":
+      chrome.storage.local.get("wizardStep", (result) => {
+        sendResponse({ step: result.wizardStep ?? 0 });
+      });
+      return true;
+
+    case "setWizardStep":
+      chrome.storage.local.set({ wizardStep: message.step }, () => sendResponse({ ok: true }));
+      return true;
+
     case "getSavedFilters":
       chrome.storage.local.get("savedFilters", (result) => {
         sendResponse({ filters: result.savedFilters || [] });
