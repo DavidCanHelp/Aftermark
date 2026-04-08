@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aftermark",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Your bookmarks are breadcrumbs.",
   "permissions": ["bookmarks", "storage", "activeTab"],
   "host_permissions": ["<all_urls>"],

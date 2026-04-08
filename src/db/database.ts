@@ -5,10 +5,11 @@ import type {
   InferenceRecord,
   Cluster,
   ActionArtifact,
+  Session,
 } from "../models/types";
 
 const DB_NAME = "aftermark";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export interface AftermarkDB {
   bookmarks: {
@@ -30,6 +31,10 @@ export interface AftermarkDB {
     key: string;
     value: Cluster;
   };
+  sessions: {
+    key: string;
+    value: Session;
+  };
   artifacts: {
     key: string;
     value: ActionArtifact;
@@ -41,7 +46,7 @@ let dbInstance: IDBPDatabase<AftermarkDB> | null = null;
 
 function createDB(): Promise<IDBPDatabase<AftermarkDB>> {
   return openDB<AftermarkDB>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion, _newVersion, transaction) {
+    upgrade(db, _oldVersion, _newVersion, transaction) {
       if (!db.objectStoreNames.contains("bookmarks")) {
         const bookmarks = db.createObjectStore("bookmarks", { keyPath: "id" });
         bookmarks.createIndex("by-normalized-url", "normalizedUrl");
@@ -72,6 +77,10 @@ function createDB(): Promise<IDBPDatabase<AftermarkDB>> {
 
       if (!db.objectStoreNames.contains("clusters")) {
         db.createObjectStore("clusters", { keyPath: "id" });
+      }
+
+      if (!db.objectStoreNames.contains("sessions")) {
+        db.createObjectStore("sessions", { keyPath: "id" });
       }
 
       if (!db.objectStoreNames.contains("artifacts")) {

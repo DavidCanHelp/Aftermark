@@ -5,204 +5,37 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 400px;
-      max-height: 500px;
+      width: 260px;
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 13px;
       background: #1a1a2e;
       color: #e0e0e0;
-      display: flex;
-      flex-direction: column;
+      padding: 16px;
     }
-    header {
-      padding: 12px 16px 10px;
-      border-bottom: 1px solid #2a2a4a;
-      flex-shrink: 0;
-    }
-    .header-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      margin-bottom: 6px;
-    }
-    h1 {
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-    }
-    .stats-counts {
-      display: flex;
-      gap: 10px;
-      font-size: 11px;
-      color: #888;
-    }
-    .stats-counts span { white-space: nowrap; }
-    .sc-num { font-weight: 600; }
-    .sc-total .sc-num { color: #aaa; }
-    .sc-dupes .sc-num { color: #f39c12; }
-    .sc-dead .sc-num { color: #e74c3c; }
-    #type-breakdown {
-      font-size: 11px;
-      color: #666;
-      margin-bottom: 8px;
-      line-height: 1.5;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    #type-breakdown .tb-type { color: #888; }
-    #type-breakdown .tb-count { color: #aaa; font-weight: 500; }
-    #search {
+    h1 { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .tagline { font-size: 11px; color: #666; margin-bottom: 14px; }
+    .stat-line { font-size: 13px; color: #aaa; margin-bottom: 14px; }
+    .stat-line strong { color: #fff; }
+    button {
       width: 100%;
-      padding: 7px 10px;
+      padding: 10px;
       background: #16213e;
       border: 1px solid #2a2a4a;
       border-radius: 6px;
-      color: #e0e0e0;
-      font-size: 13px;
-      outline: none;
-    }
-    #search:focus { border-color: #4a4a8a; }
-    #search::placeholder { color: #555; }
-    .actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      border-bottom: 1px solid #2a2a4a;
-      flex-shrink: 0;
-    }
-    button {
-      padding: 5px 10px;
-      background: #16213e;
-      border: 1px solid #2a2a4a;
-      border-radius: 4px;
       color: #ccc;
-      font-size: 11px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    button:hover { background: #1a2744; border-color: #4a4a8a; }
-    button:disabled { opacity: 0.5; cursor: default; }
-    .actions-spacer { flex: 1; }
-    .progress-area {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-    .progress-bar-track {
-      flex: 1;
-      height: 4px;
-      background: #2a2a4a;
-      border-radius: 2px;
-      overflow: hidden;
-      display: none;
-    }
-    .progress-bar-track.active { display: block; }
-    .progress-bar-fill {
-      height: 100%;
-      background: #4a8aff;
-      border-radius: 2px;
-      width: 0%;
-      transition: width 0.2s ease;
-    }
-    #linkcheck-status {
-      font-size: 11px;
-      color: #888;
-      white-space: nowrap;
-    }
-    #bookmark-list {
-      flex: 1;
-      overflow-y: auto;
-      min-height: 0;
-      max-height: 380px;
-    }
-    .bookmark-item {
-      padding: 8px 16px;
-      border-bottom: 1px solid #1e1e3a;
-      cursor: pointer;
-    }
-    .bookmark-item:hover { background: #16213e; }
-    .bm-title {
       font-size: 13px;
-      color: #ddd;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 3px;
+      cursor: pointer;
+      margin-bottom: 6px;
     }
-    .bm-meta {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      color: #666;
-    }
-    .bm-domain {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      min-width: 0;
-    }
-    .bm-badges { display: flex; gap: 4px; flex-shrink: 0; }
-    .badge {
-      padding: 1px 6px;
-      border-radius: 8px;
-      font-size: 10px;
-      font-weight: 500;
-      flex-shrink: 0;
-      line-height: 1.5;
-    }
-    .badge-dead { background: #3a1a1a; color: #e74c3c; }
-    .badge-duplicate { background: #3a2a1a; color: #f39c12; }
-    /* Content type badge colors */
-    .badge-ct-github-repo { background: #1a2e1a; color: #4caf50; }
-    .badge-ct-docs { background: #1a2040; color: #64b5f6; }
-    .badge-ct-article { background: #2a1a3a; color: #ba68c8; }
-    .badge-ct-video { background: #2e2a1a; color: #ff9800; }
-    .badge-ct-shopping { background: #3a1a1a; color: #ef5350; }
-    .badge-ct-travel { background: #1a2e2e; color: #4dd0e1; }
-    .badge-ct-academic { background: #2a2a1a; color: #dce775; }
-    .badge-ct-social { background: #2a1a2a; color: #f48fb1; }
-    .badge-ct-forum { background: #1a2a2a; color: #80cbc4; }
-    .badge-ct-tool { background: #2a2a2a; color: #b0bec5; }
-    .badge-ct-reference { background: #1a1a2e; color: #9fa8da; }
-    .badge-ct-unknown { background: #222; color: #666; }
-    .empty-state {
-      padding: 32px 16px;
-      text-align: center;
-      color: #555;
-    }
+    button:hover { background: #1a2744; border-color: #4a4a8a; color: #fff; }
   </style>
 </head>
 <body>
-  <header>
-    <div class="header-row">
-      <h1>Aftermark</h1>
-      <div class="stats-counts">
-        <span class="sc-total"><span class="sc-num" id="stat-total">—</span> total</span>
-        <span class="sc-dupes"><span class="sc-num" id="stat-dupes">—</span> dupes</span>
-        <span class="sc-dead"><span class="sc-num" id="stat-dead">—</span> dead</span>
-      </div>
-    </div>
-    <div id="type-breakdown"></div>
-    <input type="text" id="search" placeholder="Search title, URL, domain, tags, or content type…">
-  </header>
-  <div class="actions">
-    <button id="reimport">Reimport</button>
-    <button id="linkcheck">Check Dead Links</button>
-    <div class="progress-area">
-      <div class="progress-bar-track" id="progress-track">
-        <div class="progress-bar-fill" id="progress-fill"></div>
-      </div>
-      <span id="linkcheck-status"></span>
-    </div>
-    <span class="actions-spacer"></span>
-    <button id="options">Settings</button>
-  </div>
-  <div id="bookmark-list"></div>
+  <h1>Aftermark</h1>
+  <div class="tagline">Your bookmarks are breadcrumbs.</div>
+  <div class="stat-line"><strong id="count">—</strong> bookmarks indexed</div>
+  <button id="open">Open Aftermark</button>
+  <button id="settings">Settings</button>
   <script src="/dist/popup/popup.js" type="module"></script>
 </body>
 </html>

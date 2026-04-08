@@ -1,6 +1,15 @@
 export type BookmarkStatus = "active" | "dead" | "duplicate" | "excluded";
 export type AnalysisMode = "metadata-only" | "full-page";
-export type ClusterType = "project" | "topic" | "decision" | "learning";
+export type ClusterType =
+  | "domain"
+  | "folder"
+  | "session"
+  | "path"
+  | "shopping"
+  | "project"
+  | "topic"
+  | "decision"
+  | "learning";
 export type ArtifactType =
   | "reading-list"
   | "comparison-table"
@@ -60,6 +69,16 @@ export interface Cluster {
   name: string;
   type: ClusterType;
   bookmarkIds: string[];
+}
+
+export interface Session {
+  id: string;
+  startTime: number;
+  endTime: number;
+  bookmarkIds: string[];
+  dominantDomain: string;
+  dominantContentType: ContentType;
+  bookmarkCount: number;
 }
 
 export interface ActionArtifact {

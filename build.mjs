@@ -9,16 +9,15 @@ const common = {
   format: "esm",
 };
 
-const entryPoints = [
-  { in: "src/background/service-worker.ts", out: "background/service-worker" },
-  { in: "src/popup/popup.ts", out: "popup/popup" },
-  { in: "src/options/options.ts", out: "options/options" },
-];
-
 async function build() {
   const ctx = await esbuild.context({
     ...common,
-    entryPoints: entryPoints.map((e) => e.in),
+    entryPoints: [
+      "src/background/service-worker.ts",
+      "src/popup/popup.ts",
+      "src/options/options.ts",
+      "src/tab/tab.ts",
+    ],
     outdir: "dist",
     outbase: "src",
   });
