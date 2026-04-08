@@ -7,20 +7,231 @@ import {
 import { checkDeadLinks } from "../capture/linkcheck";
 import { buildAllClusters, getAllClusters } from "../capture/clusters";
 import { buildSessions, getAllSessions } from "../capture/sessions";
+import { classifyBookmark, normalizeUrl } from "../capture/heuristics";
+import { computeHealthScore } from "../capture/health";
+import { captureTabContext } from "../capture/context";
 import { getDB } from "../db/database";
+import type { Bookmark } from "../models/types";
+
+// ── Badge ──
+
+async function updateBadge() {
+  const db = await getDB();
+  const count = await db.count("bookmarks");
+  chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
+  chrome.action.setBadgeBackgroundColor({ color: "#4a8aff" });
+}
+
+// ── Notify open Aftermark tabs to refresh ──
+
+function notifyTabsChanged() {
+  chrome.runtime.sendMessage({ type: "bookmarkChanged" }).catch(() => {});
+}
+
+// ── Cluster integration for a single bookmark ──
+
+async function integrateIntoCluster(bm: Bookmark) {
+  const db = await getDB();
+  const DOMAIN_MIN = 5;
+
+  // Check domain clusters
+  if (bm.domain) {
+    const domainClusterId = `domain:${bm.domain.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80)}`;
+    const existing = await db.get("clusters", domainClusterId);
+    if (existing) {
+      if (!existing.bookmarkIds.includes(bm.id)) {
+        existing.bookmarkIds.push(bm.id);
+        await db.put("clusters", existing);
+      }
+    } else {
+      // Count bookmarks with this domain
+      const all = await db.getAll("bookmarks");
+      const domainCount = all.filter((b) => b.domain === bm.domain).length;
+      if (domainCount >= DOMAIN_MIN) {
+        const ids = all.filter((b) => b.domain === bm.domain).map((b) => b.id);
+        await db.put("clusters", {
+          id: domainClusterId,
+          name: bm.domain,
+          type: "domain",
+          bookmarkIds: ids,
+        });
+        console.log(`[monitor] New cluster detected: ${bm.domain} (${domainCount} bookmarks)`);
+      }
+    }
+  }
+
+  // Check session extension — if within 30min of most recent session
+  const SESSION_GAP = 30 * 60 * 1000;
+  const sessions = await db.getAll("sessions");
+  if (sessions.length > 0) {
+    const sorted = sessions.sort((a, b) => b.endTime - a.endTime);
+    const latest = sorted[0];
+    if (bm.dateAdded - latest.endTime <= SESSION_GAP) {
+      if (!latest.bookmarkIds.includes(bm.id)) {
+        latest.bookmarkIds.push(bm.id);
+        latest.endTime = bm.dateAdded;
+        latest.bookmarkCount = latest.bookmarkIds.length;
+        await db.put("sessions", latest);
+      }
+    }
+  }
+}
+
+// ── Resolve folder path from Chrome bookmark parent chain ──
+
+async function resolveFolderPath(parentId: string | undefined): Promise<string> {
+  if (!parentId) return "";
+  const parts: string[] = [];
+  let id: string | undefined = parentId;
+  while (id) {
+    try {
+      const nodes: chrome.bookmarks.BookmarkTreeNode[] = await chrome.bookmarks.get(id);
+      if (nodes.length === 0) break;
+      const node: chrome.bookmarks.BookmarkTreeNode = nodes[0];
+      if (node.title) parts.unshift(node.title);
+      id = node.parentId;
+    } catch {
+      break;
+    }
+  }
+  return parts.join("/");
+}
+
+// ── Install ──
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === "install") {
     const result = await importAllBookmarks();
-    console.log(
-      `Aftermark: imported ${result.total} bookmarks (${result.duplicates} duplicates) on install.`
-    );
+    console.log(`Aftermark: imported ${result.total} bookmarks (${result.duplicates} duplicates) on install.`);
     await buildAllClusters();
     await buildSessions();
   }
+  await updateBadge();
 });
 
-type Msg = Record<string, any>;
+// ── Bookmark event listeners ──
+
+// Prevent re-entrant handling when we create/remove bookmarks ourselves
+let suppressEvents = false;
+
+chrome.bookmarks.onCreated.addListener(async (id, node) => {
+  if (suppressEvents || !node.url) return;
+  try {
+    const folderPath = await resolveFolderPath(node.parentId);
+    const classification = classifyBookmark({
+      url: node.url,
+      title: node.title || "",
+      folderPath,
+    });
+
+    const bm: Bookmark = {
+      id,
+      url: node.url,
+      normalizedUrl: normalizeUrl(node.url),
+      title: node.title || "",
+      folderPath,
+      domain: classification.domain,
+      contentType: classification.contentType,
+      dateAdded: node.dateAdded ?? Date.now(),
+      tags: classification.tags,
+      status: "active",
+    };
+    bm.healthScore = computeHealthScore(bm);
+
+    const db = await getDB();
+    await db.put("bookmarks", bm);
+
+    await integrateIntoCluster(bm);
+    await captureTabContext(id, node.url);
+    await updateBadge();
+    notifyTabsChanged();
+
+    console.log(`[monitor] Bookmark created: "${bm.title}" (${bm.domain}, ${bm.contentType})`);
+  } catch (err) {
+    console.error("[monitor] onCreated error:", err);
+  }
+});
+
+chrome.bookmarks.onChanged.addListener(async (id, changeInfo) => {
+  if (suppressEvents) return;
+  try {
+    const db = await getDB();
+    const bm = await db.get("bookmarks", id);
+    if (!bm) return;
+
+    if (changeInfo.title !== undefined) bm.title = changeInfo.title;
+    if (changeInfo.url !== undefined) {
+      bm.url = changeInfo.url;
+      bm.normalizedUrl = normalizeUrl(changeInfo.url);
+    }
+
+    const classification = classifyBookmark({
+      url: bm.url,
+      title: bm.title,
+      folderPath: bm.folderPath,
+    });
+    bm.domain = classification.domain;
+    bm.contentType = classification.contentType;
+    bm.tags = classification.tags;
+    bm.healthScore = computeHealthScore(bm);
+
+    await db.put("bookmarks", bm);
+    notifyTabsChanged();
+
+    console.log(`[monitor] Bookmark changed: "${bm.title}"`);
+  } catch (err) {
+    console.error("[monitor] onChanged error:", err);
+  }
+});
+
+chrome.bookmarks.onRemoved.addListener(async (id) => {
+  if (suppressEvents) return;
+  try {
+    const db = await getDB();
+    const exists = await db.get("bookmarks", id);
+    if (!exists) return;
+
+    await db.delete("bookmarks", id);
+    await pruneEmptyClusters(new Set([id]));
+    await updateBadge();
+    notifyTabsChanged();
+
+    console.log(`[monitor] Bookmark removed externally: ${id}`);
+  } catch (err) {
+    console.error("[monitor] onRemoved error:", err);
+  }
+});
+
+chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
+  if (suppressEvents) return;
+  try {
+    const db = await getDB();
+    const bm = await db.get("bookmarks", id);
+    if (!bm) return;
+
+    const folderPath = await resolveFolderPath(moveInfo.parentId);
+    bm.folderPath = folderPath;
+
+    const classification = classifyBookmark({
+      url: bm.url,
+      title: bm.title,
+      folderPath,
+    });
+    bm.domain = classification.domain;
+    bm.contentType = classification.contentType;
+    bm.tags = classification.tags;
+    bm.healthScore = computeHealthScore(bm);
+
+    await db.put("bookmarks", bm);
+    notifyTabsChanged();
+
+    console.log(`[monitor] Bookmark moved: "${bm.title}" → ${folderPath}`);
+  } catch (err) {
+    console.error("[monitor] onMoved error:", err);
+  }
+});
+
+// ── Helper: prune empty clusters ──
 
 async function pruneEmptyClusters(deletedIds?: Set<string>): Promise<string[]> {
   const db = await getDB();
@@ -28,7 +239,6 @@ async function pruneEmptyClusters(deletedIds?: Set<string>): Promise<string[]> {
   const removed: string[] = [];
   const tx = db.transaction("clusters", "readwrite");
   for (const cluster of clusters) {
-    // If deletedIds provided, filter them out first
     if (deletedIds) {
       cluster.bookmarkIds = cluster.bookmarkIds.filter((id: string) => !deletedIds.has(id));
       await tx.store.put(cluster);
@@ -39,11 +249,13 @@ async function pruneEmptyClusters(deletedIds?: Set<string>): Promise<string[]> {
     }
   }
   await tx.done;
-  if (removed.length > 0) {
-    console.log(`[clusters] pruned ${removed.length} empty clusters`);
-  }
+  if (removed.length > 0) console.log(`[clusters] pruned ${removed.length} empty clusters`);
   return removed;
 }
+
+// ── Message handler ──
+
+type Msg = Record<string, any>;
 
 function handle(message: Msg, sendResponse: (r: any) => void): boolean {
   switch (message.type) {
@@ -57,7 +269,7 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
 
     case "reimportBookmarks":
       importAllBookmarks()
-        .then(async (result) => { await buildAllClusters(); await buildSessions(); sendResponse(result); })
+        .then(async (result) => { await buildAllClusters(); await buildSessions(); await updateBadge(); sendResponse(result); })
         .catch(() => sendResponse({ total: 0, duplicates: 0 }));
       return true;
 
@@ -110,8 +322,11 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
       (async () => {
         const db = await getDB();
         await db.delete("bookmarks", message.bookmarkId);
+        suppressEvents = true;
         try { await chrome.bookmarks.remove(message.bookmarkId); } catch { /* may already be gone */ }
+        suppressEvents = false;
         const pruned = await pruneEmptyClusters(new Set([message.bookmarkId]));
+        await updateBadge();
         sendResponse({ ok: true, prunedClusters: pruned });
       })().catch(() => sendResponse({ ok: false }));
       return true;
@@ -121,14 +336,17 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
         const ids = message.bookmarkIds as string[];
         const db = await getDB();
         const tx = db.transaction("bookmarks", "readwrite");
+        suppressEvents = true;
         for (const id of ids) {
           await tx.store.delete(id);
           try { await chrome.bookmarks.remove(id); } catch { /* ignore */ }
         }
+        suppressEvents = false;
         await tx.done;
         const pruned = await pruneEmptyClusters(new Set(ids));
+        await updateBadge();
         sendResponse({ ok: true, count: ids.length, prunedClusters: pruned });
-      })().catch(() => sendResponse({ ok: false, count: 0 }));
+      })().catch(() => { suppressEvents = false; sendResponse({ ok: false, count: 0 }); });
       return true;
 
     // ── CRUD: Update ──
@@ -144,12 +362,13 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
           if (message.status !== "duplicate") delete bm.canonicalId;
         }
         await db.put("bookmarks", bm);
-        // Sync title back to Chrome bookmarks
+        suppressEvents = true;
         if (message.title !== undefined) {
           try { await chrome.bookmarks.update(message.bookmarkId, { title: message.title }); } catch { /* ignore */ }
         }
+        suppressEvents = false;
         sendResponse({ ok: true, bookmark: bm });
-      })().catch(() => sendResponse({ ok: false }));
+      })().catch(() => { suppressEvents = false; sendResponse({ ok: false }); });
       return true;
 
     case "updateBookmarkStatus":
@@ -184,9 +403,14 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
 
     // ── CRUD: Create ──
     case "createBookmark":
-      createBookmark(message.url, message.title, message.folderPath, message.tags)
-        .then((bm) => sendResponse({ ok: true, bookmark: bm }))
-        .catch((err) => { console.error("[sw] createBookmark error:", err); sendResponse({ ok: false }); });
+      (async () => {
+        suppressEvents = true;
+        const bm = await createBookmark(message.url, message.title, message.folderPath, message.tags);
+        suppressEvents = false;
+        await integrateIntoCluster(bm);
+        await updateBadge();
+        sendResponse({ ok: true, bookmark: bm });
+      })().catch((err) => { suppressEvents = false; console.error("[sw] createBookmark error:", err); sendResponse({ ok: false }); });
       return true;
 
     // ── Cluster management ──

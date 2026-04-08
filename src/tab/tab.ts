@@ -912,6 +912,14 @@ $("btn-reimport").addEventListener("click", async () => {
 
 $("btn-settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
+// ── Live refresh on external bookmark changes ──
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === "bookmarkChanged") {
+    loadData().then(() => renderCurrentView());
+  }
+});
+
 // ── Init ──
 
 async function init() { await loadData(); renderCurrentView(); }
