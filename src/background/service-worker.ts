@@ -79,6 +79,27 @@ function handle(message: Msg, sendResponse: (r: any) => void): boolean {
       getAllSessions().then((sessions) => sendResponse({ sessions })).catch(() => sendResponse({ sessions: [] }));
       return true;
 
+    case "getSavedFilters":
+      chrome.storage.local.get("savedFilters", (result) => {
+        sendResponse({ filters: result.savedFilters || [] });
+      });
+      return true;
+
+    case "saveFilter":
+      chrome.storage.local.get("savedFilters", (result) => {
+        const filters = (result.savedFilters || []) as any[];
+        filters.push(message.filter);
+        chrome.storage.local.set({ savedFilters: filters }, () => sendResponse({ ok: true }));
+      });
+      return true;
+
+    case "deleteFilter":
+      chrome.storage.local.get("savedFilters", (result) => {
+        const filters = ((result.savedFilters || []) as any[]).filter((_: any, i: number) => i !== message.index);
+        chrome.storage.local.set({ savedFilters: filters }, () => sendResponse({ ok: true }));
+      });
+      return true;
+
     case "openAftermarkTab":
       chrome.tabs.create({ url: chrome.runtime.getURL("src/tab/tab.html") });
       sendResponse({ ok: true });

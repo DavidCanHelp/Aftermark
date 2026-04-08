@@ -15,17 +15,43 @@ function extractDomain(url: string): string {
 }
 
 const domainPatterns: [RegExp, ContentType, string[]][] = [
+  // Code
   [/^github\.com$/, "github-repo", ["code"]],
   [/^gitlab\.com$/, "github-repo", ["code"]],
   [/^bitbucket\.org$/, "github-repo", ["code"]],
+  // Video
   [/^(youtube\.com|youtu\.be|vimeo\.com)$/, "video", ["video"]],
+  // Music
+  [/^(spotify\.com|soundcloud\.com|bandcamp\.com|music\.youtube\.com)$/, "music", ["music"]],
+  // Shopping
   [/^(amazon\.(com|co\.\w+)|ebay\.com|etsy\.com)$/, "shopping", ["shopping"]],
+  // Real estate
+  [/^(craigslist\.org|zillow\.com|redfin\.com|trulia\.com|realtor\.com|apartments\.com)$/, "real-estate", ["real-estate"]],
+  // Forum
   [/^(stackoverflow\.com|stackexchange\.com|reddit\.com|news\.ycombinator\.com)$/, "forum", ["community"]],
-  [/^(medium\.com|substack\.com|dev\.to|hashnode\.dev|blog\.)/, "article", ["article"]],
+  // Article
+  [/^(medium\.com|substack\.com|dev\.to|hashnode\.dev)$/, "article", ["article"]],
+  [/^blog\./, "article", ["article"]],
+  // News
+  [/^(nytimes\.com|bbc\.com|bbc\.co\.uk|cnn\.com|reuters\.com|theguardian\.com|washingtonpost\.com|apnews\.com)$/, "news", ["news"]],
+  // Academic
   [/^(arxiv\.org|scholar\.google\.com|pubmed\.ncbi\.nlm\.nih\.gov)$/, "academic", ["research"]],
+  // Travel
   [/^(booking\.com|airbnb\.com|expedia\.com|tripadvisor\.com)$/, "travel", ["travel"]],
+  // Social
   [/^(twitter\.com|x\.com|facebook\.com|instagram\.com|linkedin\.com|mastodon\.\w+)$/, "social", ["social"]],
-  [/^(wikipedia\.org|en\.wikipedia\.org)$/, "reference", ["reference"]],
+  // Events
+  [/^(meetup\.com|eventbrite\.com)$/, "events", ["events"]],
+  // Package registries
+  [/^(npmjs\.com|crates\.io|pypi\.org|packagist\.org)$/, "package", ["package"]],
+  // Reference
+  [/^(en\.wikipedia\.org|wikipedia\.org|britannica\.com)$/, "reference", ["reference"]],
+  // Google services
+  [/^docs\.google\.com$/, "docs", ["google", "docs"]],
+  [/^maps\.google\.com$/, "reference", ["google", "maps"]],
+  [/^drive\.google\.com$/, "tool", ["google", "drive"]],
+  [/^mail\.google\.com$/, "tool", ["google", "email"]],
+  [/^calendar\.google\.com$/, "tool", ["google", "calendar"]],
 ];
 
 const hostPrefixPatterns: [RegExp, ContentType, string[]][] = [
@@ -35,7 +61,7 @@ const hostPrefixPatterns: [RegExp, ContentType, string[]][] = [
 ];
 
 const pathPatterns: [RegExp, ContentType, string[]][] = [
-  [/^\/[^/]+\/[^/]+\/?$/, "github-repo", ["repo"]], // github.com/user/repo
+  [/^\/[^/]+\/[^/]+\/?$/, "github-repo", ["repo"]],
 ];
 
 const titlePatterns: [RegExp, string[]][] = [
@@ -53,7 +79,6 @@ export function classifyBookmark(
   let contentType: ContentType = "unknown";
   const tags: string[] = [];
 
-  // Check domain patterns
   for (const [pattern, type, domainTags] of domainPatterns) {
     if (pattern.test(domain)) {
       contentType = type;
@@ -62,7 +87,6 @@ export function classifyBookmark(
     }
   }
 
-  // Check host prefix patterns (docs.*, wiki.*)
   if (contentType === "unknown") {
     for (const [pattern, type, prefixTags] of hostPrefixPatterns) {
       if (pattern.test(domain)) {
@@ -73,7 +97,6 @@ export function classifyBookmark(
     }
   }
 
-  // Check path patterns (only for github.com)
   if (domain === "github.com") {
     try {
       const pathname = new URL(bookmark.url).pathname;
@@ -84,19 +107,15 @@ export function classifyBookmark(
           break;
         }
       }
-    } catch {
-      // ignore malformed URLs
-    }
+    } catch { /* ignore */ }
   }
 
-  // Extract tags from title
   for (const [pattern, titleTags] of titlePatterns) {
     if (pattern.test(bookmark.title)) {
       tags.push(...titleTags);
     }
   }
 
-  // Extract tags from folder path
   if (bookmark.folderPath) {
     const folders = bookmark.folderPath.split("/").filter(Boolean);
     for (const folder of folders) {
@@ -107,24 +126,16 @@ export function classifyBookmark(
     }
   }
 
-  // Deduplicate tags
-  const uniqueTags = [...new Set(tags)];
-
-  return { domain, contentType, tags: uniqueTags };
+  return { domain, contentType, tags: [...new Set(tags)] };
 }
 
 export function normalizeUrl(url: string): string {
   try {
     const u = new URL(url);
-    // Normalize protocol to https
     u.protocol = "https:";
-    // Remove www. prefix
     u.hostname = u.hostname.replace(/^www\./, "");
-    // Remove default ports
     u.port = "";
-    // Remove hash fragment
     u.hash = "";
-    // Sort query parameters for consistent comparison
     if (u.search) {
       const params = new URLSearchParams(u.searchParams);
       const entries: [string, string][] = [];
@@ -133,7 +144,6 @@ export function normalizeUrl(url: string): string {
       const sorted = new URLSearchParams(entries);
       u.search = sorted.toString();
     }
-    // Remove trailing slash from path
     if (u.pathname.endsWith("/") && u.pathname !== "/") {
       u.pathname = u.pathname.slice(0, -1);
     }

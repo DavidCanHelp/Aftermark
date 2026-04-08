@@ -1,4 +1,4 @@
-export type BookmarkStatus = "active" | "dead" | "duplicate" | "excluded";
+export type BookmarkStatus = "active" | "dead" | "duplicate" | "likely-duplicate" | "excluded";
 export type AnalysisMode = "metadata-only" | "full-page";
 export type ClusterType =
   | "domain"
@@ -27,6 +27,11 @@ export type ContentType =
   | "forum"
   | "tool"
   | "reference"
+  | "news"
+  | "real-estate"
+  | "events"
+  | "package"
+  | "music"
   | "unknown";
 
 export interface Bookmark {
@@ -42,6 +47,7 @@ export interface Bookmark {
   tags: string[];
   status: BookmarkStatus;
   canonicalId?: string;
+  healthScore?: number;
 }
 
 export interface DocumentSnapshot {
@@ -85,4 +91,11 @@ export interface ActionArtifact {
   clusterId: string;
   type: ArtifactType;
   content: string;
+}
+
+export interface SavedFilter {
+  name: string;
+  query: string;
+  contentType: string;
+  sort: string;
 }

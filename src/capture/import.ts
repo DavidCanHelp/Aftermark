@@ -2,6 +2,7 @@ import { getDB } from "../db/database";
 import type { Bookmark } from "../models/types";
 import { classifyBookmark, normalizeUrl } from "./heuristics";
 import { detectDuplicates } from "./duplicates";
+import { computeAllHealthScores } from "./health";
 
 function flattenBookmarkTree(
   nodes: chrome.bookmarks.BookmarkTreeNode[],
@@ -60,6 +61,7 @@ export async function importAllBookmarks(): Promise<ImportResult> {
   await tx.done;
 
   const duplicates = await detectDuplicates();
+  await computeAllHealthScores();
 
   return { total: bookmarks.length, duplicates };
 }
